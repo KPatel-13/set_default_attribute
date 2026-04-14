@@ -1,3 +1,5 @@
+#Dev failure
+
 name: Dev Failure
 
 on:
@@ -109,8 +111,8 @@ jobs:
       - name: Notify central service
         if: steps.dev_fail.outputs.exit_code != '0'
         env:
-          WORKFLOW_FAILURE_ENDPOINT: ${{ secrets.DEV_WORKFLOW_FAILURE_ENDPOINT }}
-          WORKFLOW_FAILURE_SECRET: ${{ secrets.DEV_WORKFLOW_FAILURE_SECRET }}
+          WORKFLOW_FAILURE_ENDPOINT: ${{ secrets.WORKFLOW_FAILURE_ENDPOINT }}
+          WORKFLOW_FAILURE_SECRET: ${{ secrets.WORKFLOW_FAILURE_SECRET }}
         run: |
           # Do not echo the endpoint or secret.
           # We only capture the HTTP status code and response body.
