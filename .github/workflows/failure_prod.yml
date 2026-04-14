@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   run-failing-job:
-    name: Run failing simulated job
+    name: Run failing job
     runs-on: ubuntu-latest
 
     steps:
@@ -61,7 +61,7 @@ jobs:
           echo "Failure mode: ${{ inputs.failure_mode }}"
           echo "Requested error code: ${{ inputs.error_code }}"
 
-      - name: Run simulated operational job
+      - name: Run operational job
         id: prod_fail
         env:
           SIM_ERROR_CODE: ${{ inputs.error_code }}
@@ -144,7 +144,35 @@ jobs:
             exit 1
           fi
 
-      - name: Mark workflow as failed for demo realism
+      - name: Notify DEV environment
+        if: steps.prod_fail.outputs.exit_code != '0'
+        env:
+          DEV_WORKFLOW_FAILURE_ENDPOINT: ${{ secrets.WORKFLOW_FAILURE_ENDPOINT }}
+          DEV_WORKFLOW_FAILURE_SECRET: ${{ secrets.WORKFLOW_FAILURE_SECRET }}
+        run: |
+          # This is the same notification logic as above, but sending to the DEV environment for testing purposes.
+          response_file="dev_response.json"
+
+          status_code=$(curl \
+            --show-error \
+            --silent \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            -X POST "${DEV_WORKFLOW_FAILURE_ENDPOINT}" \
+            -H "Content-Type: application/json" \
+            -H "X-Workflow-Secret: ${DEV_WORKFLOW_FAILURE_SECRET}" \
+            --data @payload.json)
+
+          echo "HTTP status (DEV): ${status_code}"
+          echo "Response body (DEV):"
+          cat "$response_file"
+
+          if [ "$status_code" -lt 200 ] || [ "$status_code" -ge 300 ]; then
+            echo "Request to DEV environment failed."
+            exit 1
+          fi
+
+      - name: Mark workflow as failed
         if: steps.prod_fail.outputs.exit_code != '0'
         run: |
           echo "The operational job failed, so this workflow is being marked as failed."

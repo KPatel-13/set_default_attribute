@@ -1,10 +1,10 @@
-name: Simulator Success
+name: Success
 
 on:
   workflow_dispatch:
     inputs:
       job_name:
-        description: "Operational job name to simulate"
+        description: "Operational job name"
         required: true
         default: "daily-data-sync"
 
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   run-successful-job:
-    name: Run successful simulated job
+    name: Run successful job
     runs-on: ubuntu-latest
 
     steps:
@@ -31,7 +31,7 @@ jobs:
           echo "Workflow: ${{ github.workflow }}"
           echo "Job: ${{ inputs.job_name }}"
 
-      - name: Run simulated job successfully
+      - name: Run job successfully
         env:
           SIM_MODE: success
         run: |
@@ -43,4 +43,4 @@ jobs:
 
       - name: No notification required
         run: |
-          echo "Simulated job succeeded. No failure payload will be sent."
+          echo "Job succeeded. No failure payload will be sent."

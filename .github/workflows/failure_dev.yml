@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       job_name:
-        description: "Operational job name to simulate"
+        description: "Operational job"
         required: true
         default: "daily-data-sync"
       failure_mode:
@@ -40,7 +40,7 @@ permissions:
 
 jobs:
   run-failing-job:
-    name: Run failing simulated job
+    name: Run failing job
     runs-on: ubuntu-latest
 
     steps:
@@ -60,7 +60,7 @@ jobs:
           echo "Failure mode: ${{ inputs.failure_mode }}"
           echo "Requested error code: ${{ inputs.error_code }}"
 
-      - name: Run simulated operational job
+      - name: Run operational job
         id: dev_fail
         env:
           SIM_ERROR_CODE: ${{ inputs.error_code }}
