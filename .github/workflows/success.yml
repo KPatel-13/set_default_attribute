@@ -50,8 +50,19 @@ def write_result(data: dict) -> None:
 def main() -> int:
     mode = os.getenv("SIM_MODE", "failure").strip().lower()
     requested_code = os.getenv("SIM_ERROR_CODE", "MAPPING_FILE_MISSING").strip().upper()
+    job_name = os.getenv("SIM_JOB_NAME", "set-default-attribute").strip()
 
     available_codes = list(ERRORS.keys())
+
+    if mode == "success":
+        write_result(
+            {
+                "summary": f"{job_name} completed successfully",
+                "details": "The simulated upstream job completed successfully and did not raise a failure ticket.",
+                "severity": "low",
+            }
+        )
+        return 0
 
     if mode == "random":
         error_code = random.choice(available_codes)
