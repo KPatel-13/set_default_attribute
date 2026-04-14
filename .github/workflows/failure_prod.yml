@@ -1,0 +1,174 @@
+# Simulates a live production-style failure in an upstream service.
+# This sends the same failure payload to both dev and prod central services.
+
+name: Simulator Failure - Prod Like
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_name:
+        description: "Operational job name to simulate"
+        required: true
+        default: "set-default-attribute"
+
+      failure_mode:
+        description: "Choose fixed for dedupe demos, or random for variety"
+        required: true
+        default: "fixed"
+        type: choice
+        options:
+          - fixed
+          - random
+
+      error_code:
+        description: "Used when failure_mode=fixed"
+        required: true
+        default: "MAPPING_FILE_MISSING"
+        type: choice
+        options:
+          - MAPPING_FILE_MISSING
+          - MAPPING_VALUE_MISSING
+          - OBJECT_NOT_FOUND
+          - OUTPUT_WRITE_FAILED
+          - INVALID_INPUT
+          - DOWNSTREAM_UNAVAILABLE
+          - PROCESSING_TIMEOUT
+
+permissions:
+  contents: read
+
+jobs:
+  run-failing-job:
+    name: Run failing simulated job
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Show selected inputs
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Job: ${{ inputs.job_name }}"
+          echo "Failure mode: ${{ inputs.failure_mode }}"
+          echo "Requested error code: ${{ inputs.error_code }}"
+
+      - name: Run simulated operational job
+        id: job_sim
+        env:
+          SIM_ERROR_CODE: ${{ inputs.error_code }}
+        run: |
+          if [ "${{ inputs.failure_mode }}" = "random" ]; then
+            export SIM_MODE=random
+          else
+            export SIM_MODE=failure
+          fi
+
+          set +e
+          python scripts/job_sim.py
+          exit_code=$?
+          set -e
+
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          echo "Captured simulator exit code: ${exit_code}"
+
+      - name: Show generated result
+        if: always()
+        run: |
+          cat job_result.json
+
+      - name: Build request payload
+        if: steps.job_sim.outputs.exit_code != '0'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path("job_result.json").read_text(encoding="utf-8"))
+
+          payload = {
+              "repo": "${{ github.repository }}",
+              "workflowName": "${{ github.workflow }}",
+              "runId": "${{ github.run_id }}",
+              "runUrl": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "failures": [
+                  {
+                      "jobName": "${{ inputs.job_name }}",
+                      "summary": result["summary"],
+                      "details": result["details"],
+                      "severity": result["severity"],
+                  }
+              ],
+          }
+
+          Path("payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
+
+          echo "Payload being sent:"
+          cat payload.json
+
+      - name: Notify dev central service
+        if: steps.job_sim.outputs.exit_code != '0'
+        env:
+          WORKFLOW_FAILURE_ENDPOINT: ${{ secrets.DEV_WORKFLOW_FAILURE_ENDPOINT }}
+          WORKFLOW_FAILURE_SECRET: ${{ secrets.DEV_WORKFLOW_FAILURE_SECRET }}
+        run: |
+          response_file="response-dev.json"
+
+          status_code=$(curl \
+            --show-error \
+            --silent \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            -X POST "${WORKFLOW_FAILURE_ENDPOINT}" \
+            -H "Content-Type: application/json" \
+            -H "X-Workflow-Secret: ${WORKFLOW_FAILURE_SECRET}" \
+            --data @payload.json)
+
+          echo "DEV HTTP status: ${status_code}"
+          echo "DEV response body:"
+          cat "$response_file"
+
+          if [ "$status_code" -lt 200 ] || [ "$status_code" -ge 300 ]; then
+            echo "DEV request failed."
+            exit 1
+          fi
+
+      - name: Notify prod central service
+        if: steps.job_sim.outputs.exit_code != '0'
+        env:
+          WORKFLOW_FAILURE_ENDPOINT: ${{ secrets.PROD_WORKFLOW_FAILURE_ENDPOINT }}
+          WORKFLOW_FAILURE_SECRET: ${{ secrets.PROD_WORKFLOW_FAILURE_SECRET }}
+        run: |
+          response_file="response-prod.json"
+
+          status_code=$(curl \
+            --show-error \
+            --silent \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            -X POST "${WORKFLOW_FAILURE_ENDPOINT}" \
+            -H "Content-Type: application/json" \
+            -H "X-Workflow-Secret: ${WORKFLOW_FAILURE_SECRET}" \
+            --data @payload.json)
+
+          echo "PROD HTTP status: ${status_code}"
+          echo "PROD response body:"
+          cat "$response_file"
+
+          if [ "$status_code" -lt 200 ] || [ "$status_code" -ge 300 ]; then
+            echo "PROD request failed."
+            exit 1
+          fi
+
+      - name: Mark workflow as failed for demo realism
+        if: steps.job_sim.outputs.exit_code != '0'
+        run: |
+          echo "The operational job failed, so this workflow is being marked as failed."
+          exit 1
