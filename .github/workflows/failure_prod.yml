@@ -1,3 +1,5 @@
+#PROD failure
+
 name: Prod Failure
 
 on:
@@ -52,7 +54,7 @@ jobs:
           echo "Failure mode: ${{ inputs.failure_mode }}"
           echo "Requested error code: ${{ inputs.error_code }}"
 
-      - name: Run operational job
+      - name: Run simulated operational job
         id: prod_fail
         env:
           SIM_ERROR_CODE: ${{ inputs.error_code }}

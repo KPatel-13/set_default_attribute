@@ -2,8 +2,6 @@ import json
 import os
 import random
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
 
 ERROR_CATALOG = {
     "MAPPING_FILE_MISSING": {
@@ -46,53 +44,73 @@ ERROR_CATALOG = {
         "details": "The source record did not contain a required field needed to derive the default attribute.",
         "severity": "medium",
     },
+    "OBJECT_NOT_FOUND": {
+        "summary": "Required object does not exist",
+        "details": "The workflow could not find the required object in storage.",
+        "severity": "HIGH",
+    },
+    "OUTPUT_WRITE_FAILED": {
+        "summary": "Output write failed",
+        "details": "The workflow failed while writing the output artifact.",
+        "severity": "HIGH",
+    },
+    "INVALID_INPUT": {
+        "summary": "Input validation failed",
+        "details": "The workflow received invalid or incomplete input data.",
+        "severity": "MEDIUM",
+    },
+    "DOWNSTREAM_UNAVAILABLE": {
+        "summary": "Downstream service unavailable",
+        "details": "A required downstream dependency did not respond successfully.",
+        "severity": "HIGH",
+    },
+    "PROCESSING_TIMEOUT": {
+        "summary": "Processing timed out",
+        "details": "The workflow exceeded the allowed processing time.",
+        "severity": "HIGH",
+    },
 }
 
 
-def write_json_file(path: str, payload: dict) -> None:
-    Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
-def build_failure_payload(error_code: str, dataset: str) -> dict:
-    error = ERROR_CATALOG[error_code]
-    return {
-        "result": "failure",
-        "errorCode": error_code,
-        "summary": error["summary"],
-        "details": error["details"],
-        "severity": error["severity"],
-        "dataset": dataset,
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-def resolve_error_code(mode: str, requested_error_code: str) -> str:
-    if mode == "random":
-        return random.choice(list(ERROR_CATALOG.keys()))
-    return requested_error_code
+def write_result(payload: dict) -> None:
+    with open("job_result.json", "w", encoding="utf-8") as file_handle:
+        json.dump(payload, file_handle)
 
 
 def main() -> int:
-    mode = os.getenv("SIM_MODE", "failure").strip().lower()
+    mode = os.getenv("SIM_MODE", "success").strip().lower()
     requested_error_code = (
-        os.getenv("SIM_ERROR_CODE", "MAPPING_FILE_MISSING").strip().upper()
+        os.getenv("SIM_ERROR_CODE", "OBJECT_NOT_FOUND").strip().upper()
     )
-    dataset = os.getenv("SIM_DATASET", "customer-preferences").strip()
 
-    print("Starting set_default_attribute job...")
-    print(f"Dataset: {dataset}")
+    print("Starting simulated operational job...")
 
-    if mode not in {"failure", "random"}:
-        print(f"Unsupported SIM_MODE: {mode}", file=sys.stderr)
+    if mode == "success":
+        payload = {"result": "success"}
+        write_result(payload)
+        print("Job completed successfully.")
+        return 0
+
+    if mode == "random":
+        error_code = random.choice(list(ERROR_CATALOG.keys()))
+    elif mode == "failure":
+        error_code = requested_error_code
+    else:
+        print(f"Unknown SIM_MODE: {mode}", file=sys.stderr)
         return 2
 
-    if mode == "failure" and requested_error_code not in ERROR_CATALOG:
-        print(f"Unsupported SIM_ERROR_CODE: {requested_error_code}", file=sys.stderr)
+    error = ERROR_CATALOG.get(error_code)
+    if error is None:
+        print(f"Unknown SIM_ERROR_CODE: {error_code}", file=sys.stderr)
         return 2
 
-    error_code = resolve_error_code(mode, requested_error_code)
-    payload = build_failure_payload(error_code, dataset)
-    write_json_file("job_result.json", payload)
+    payload = {
+        "result": "failure",
+        "summary": error["summary"],
+        "details": error["details"],
+        "severity": error["severity"],
+    }
+    write_result(payload)
 
     print(f"Job failed with {error_code}.", file=sys.stderr)
     return 1

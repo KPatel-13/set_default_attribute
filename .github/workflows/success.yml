@@ -1,26 +1,19 @@
-name: Set Default Attribute - Success
+name: Simulator Success
 
 on:
   workflow_dispatch:
     inputs:
       job_name:
-        description: "Operational job name"
+        description: "Operational job name to simulate"
         required: true
-        default: "set-default-attribute-dev"
-      dataset:
-        description: "Logical dataset being processed"
-        required: true
-        default: "customer-preferences"
+        default: "daily-data-sync"
 
 permissions:
   contents: read
 
-run-name: >-
-  Success | job=${{ inputs.job_name }} | dataset=${{ inputs.dataset }}
-
 jobs:
   run-successful-job:
-    name: Run successful set_default_attribute job
+    name: Run successful simulated job
     runs-on: ubuntu-latest
 
     steps:
@@ -37,26 +30,12 @@ jobs:
           echo "Repository: ${{ github.repository }}"
           echo "Workflow: ${{ github.workflow }}"
           echo "Job: ${{ inputs.job_name }}"
-          echo "Dataset: ${{ inputs.dataset }}"
 
-      - name: Generate successful result
+      - name: Run simulated job successfully
+        env:
+          SIM_MODE: success
         run: |
-          python - <<'PY'
-          import json
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          payload = {
-              "result": "success",
-              "summary": "Default attribute assignment completed successfully",
-              "details": "All selected items were processed and default attributes were applied without errors.",
-              "severity": "low",
-              "dataset": "${{ inputs.dataset }}",
-              "generatedAt": datetime.now(timezone.utc).isoformat(),
-          }
-
-          Path("job_result.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-          PY
+          python scripts/job_sim.py
 
       - name: Show generated result
         run: |
