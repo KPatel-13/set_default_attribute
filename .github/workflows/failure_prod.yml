@@ -1,6 +1,3 @@
-# Simulates a live production-style failure in an upstream service.
-# This sends the same failure payload to both dev and prod central services.
-
 name: Simulator Failure - Prod Like
 
 on:
@@ -71,7 +68,7 @@ jobs:
           fi
 
           set +e
-          python scripts/job_sim.py
+          python scripts/main.py
           exit_code=$?
           set -e
 
