@@ -1,0 +1,77 @@
+import json
+import os
+import random
+import sys
+from pathlib import Path
+
+ERRORS = {
+    "MAPPING_FILE_MISSING": {
+        "summary": "Mapping file does not exist",
+        "details": "The set_default_attribute job could not find the expected mapping file in the configured input location.",
+        "severity": "high",
+    },
+    "MAPPING_VALUE_MISSING": {
+        "summary": "Value does not exist within mapping file",
+        "details": "The set_default_attribute job found the mapping file, but the expected key/value mapping was missing.",
+        "severity": "medium",
+    },
+    "OBJECT_NOT_FOUND": {
+        "summary": "Source object was not found",
+        "details": "The upstream job could not find the required source object before processing began.",
+        "severity": "high",
+    },
+    "OUTPUT_WRITE_FAILED": {
+        "summary": "Output write failed",
+        "details": "The job completed processing but failed while writing the output artefact.",
+        "severity": "high",
+    },
+    "INVALID_INPUT": {
+        "summary": "Invalid input received",
+        "details": "The job received an input payload that failed validation checks.",
+        "severity": "medium",
+    },
+    "DOWNSTREAM_UNAVAILABLE": {
+        "summary": "Downstream service unavailable",
+        "details": "A required downstream dependency was unavailable during execution.",
+        "severity": "high",
+    },
+    "PROCESSING_TIMEOUT": {
+        "summary": "Processing timed out",
+        "details": "The job exceeded its expected execution time and was terminated.",
+        "severity": "medium",
+    },
+}
+
+
+def write_result(data: dict) -> None:
+    Path("job_result.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def main() -> int:
+    mode = os.getenv("SIM_MODE", "failure").strip().lower()
+    requested_code = os.getenv("SIM_ERROR_CODE", "MAPPING_FILE_MISSING").strip().upper()
+
+    available_codes = list(ERRORS.keys())
+
+    if mode == "random":
+        error_code = random.choice(available_codes)
+    else:
+        error_code = requested_code
+
+    if error_code not in ERRORS:
+        write_result(
+            {
+                "summary": "Simulator configuration error",
+                "details": f"Unknown SIM_ERROR_CODE '{error_code}'. Valid options: {', '.join(available_codes)}",
+                "severity": "medium",
+            }
+        )
+        return 1
+
+    result = ERRORS[error_code]
+    write_result(result)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
