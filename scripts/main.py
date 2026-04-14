@@ -2,103 +2,101 @@ import json
 import os
 import random
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
-# Merged Catalog containing all your specific error scenarios
 ERROR_CATALOG = {
     "MAPPING_FILE_MISSING": {
-        "summary": "Mapping file does not exist",
-        "details": "The job could not find the expected mapping file in the configured input location.",
-        "severity": "HIGH",
+        "summary": "Attribute mapping file is missing",
+        "details": "The workflow could not locate the required attribute mapping file used to determine default values.",
+        "severity": "high",
     },
-    "MAPPING_VALUE_MISSING": {
-        "summary": "Value does not exist within mapping file",
-        "details": "The job found the mapping file, but the expected key/value mapping was missing.",
-        "severity": "MEDIUM",
+    "MAPPING_FILE_INVALID": {
+        "summary": "Attribute mapping file is invalid",
+        "details": "The attribute mapping file exists but could not be parsed because the JSON structure is invalid.",
+        "severity": "high",
     },
-    "OBJECT_NOT_FOUND": {
-        "summary": "Required object does not exist",
-        "details": "The workflow could not find the required object in storage.",
-        "severity": "HIGH",
+    "MAPPING_ITEM_NOT_FOUND": {
+        "summary": "Mapping item does not exist",
+        "details": "The requested item key was not found in the attribute mapping file.",
+        "severity": "medium",
     },
-    "OUTPUT_WRITE_FAILED": {
-        "summary": "Output write failed",
-        "details": "The workflow failed while writing the output artifact.",
-        "severity": "HIGH",
+    "SOURCE_RECORD_NOT_FOUND": {
+        "summary": "Source record was not found",
+        "details": "The source item required for default attribute assignment could not be found in the upstream data source.",
+        "severity": "high",
     },
-    "INVALID_INPUT": {
-        "summary": "Input validation failed",
-        "details": "The workflow received invalid or incomplete input data.",
-        "severity": "MEDIUM",
+    "ATTRIBUTE_UPDATE_REJECTED": {
+        "summary": "Default attribute update was rejected",
+        "details": "The downstream service rejected the default attribute update because the payload failed validation.",
+        "severity": "high",
     },
-    "DOWNSTREAM_UNAVAILABLE": {
-        "summary": "Downstream service unavailable",
-        "details": "A required downstream dependency did not respond successfully.",
-        "severity": "HIGH",
+    "DOWNSTREAM_API_UNAVAILABLE": {
+        "summary": "Downstream attribute API unavailable",
+        "details": "The downstream service required for applying the default attribute was unavailable or returned an unexpected error.",
+        "severity": "high",
     },
-    "PROCESSING_TIMEOUT": {
-        "summary": "Processing timed out",
-        "details": "The workflow exceeded the allowed processing time.",
-        "severity": "HIGH",
+    "WRITE_TIMEOUT": {
+        "summary": "Attribute update timed out",
+        "details": "The update operation exceeded the allowed execution time before the default attribute could be written.",
+        "severity": "high",
+    },
+    "MISSING_REQUIRED_FIELD": {
+        "summary": "Required source field missing",
+        "details": "The source record did not contain a required field needed to derive the default attribute.",
+        "severity": "medium",
     },
 }
 
 
-def write_result(payload: dict) -> None:
-    """Writes the job execution result to a JSON file."""
-    with open("job_result.json", "w", encoding="utf-8") as file_handle:
-        json.dump(payload, file_handle, indent=4)
+def write_json_file(path: str, payload: dict) -> None:
+    Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def main() -> int:
-    # Read environment variables
-    mode = os.getenv("SIM_MODE", "success").strip().lower()
-    requested_error_code = (
-        os.getenv("SIM_ERROR_CODE", "OBJECT_NOT_FOUND").strip().upper()
-    )
-    job_name = os.getenv("SIM_JOB_NAME", "set-default-attribute").strip()
-
-    print(f"Starting simulated operational job: {job_name}...")
-
-    # Success Path
-    if mode == "success":
-        payload = {
-            "result": "success",
-            "summary": f"{job_name} completed successfully",
-            "details": "The simulated upstream job completed successfully and did not raise a failure ticket.",
-            "severity": "LOW",
-        }
-        write_result(payload)
-        print("Job completed successfully.")
-        return 0
-
-    # Failure Path Logic
-    if mode == "random":
-        error_code = random.choice(list(ERROR_CATALOG.keys()))
-    elif mode == "failure":
-        error_code = requested_error_code
-    else:
-        print(f"Unknown SIM_MODE: {mode}", file=sys.stderr)
-        return 2
-
-    # Fetch error details from catalog
-    error = ERROR_CATALOG.get(error_code)
-    if error is None:
-        print(f"Unknown SIM_ERROR_CODE: {error_code}", file=sys.stderr)
-        return 2
-
-    # Build Failure Payload
-    payload = {
+def build_failure_payload(error_code: str, dataset: str) -> dict:
+    error = ERROR_CATALOG[error_code]
+    return {
         "result": "failure",
+        "errorCode": error_code,
         "summary": error["summary"],
         "details": error["details"],
         "severity": error["severity"],
+        "dataset": dataset,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
-    write_result(payload)
+
+
+def resolve_error_code(mode: str, requested_error_code: str) -> str:
+    if mode == "random":
+        return random.choice(list(ERROR_CATALOG.keys()))
+    return requested_error_code
+
+
+def main() -> int:
+    mode = os.getenv("SIM_MODE", "failure").strip().lower()
+    requested_error_code = (
+        os.getenv("SIM_ERROR_CODE", "MAPPING_FILE_MISSING").strip().upper()
+    )
+    dataset = os.getenv("SIM_DATASET", "customer-preferences").strip()
+
+    print("Starting set_default_attribute job...")
+    print(f"Dataset: {dataset}")
+
+    if mode not in {"failure", "random"}:
+        print(f"Unsupported SIM_MODE: {mode}", file=sys.stderr)
+        return 2
+
+    if mode == "failure" and requested_error_code not in ERROR_CATALOG:
+        print(f"Unsupported SIM_ERROR_CODE: {requested_error_code}", file=sys.stderr)
+        return 2
+
+    error_code = resolve_error_code(mode, requested_error_code)
+    payload = build_failure_payload(error_code, dataset)
+    write_json_file("job_result.json", payload)
 
     print(f"Job failed with {error_code}.", file=sys.stderr)
     return 1
 
 
 if __name__ == "__main__":
-    # Using SystemExit for clean exit code handling
     raise SystemExit(main())

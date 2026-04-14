@@ -1,31 +1,52 @@
-name: Dev Failure
+# This workflow conducts a run for the set_default_attribute job.
+
+name: Set Default Attribute - Dev Failure
 
 on:
   workflow_dispatch:
     inputs:
       job_name:
-        description: "Operational job name"
+        description: "Operational job name to simulate"
         required: true
-        default: "daily-data-sync-dev"
+        default: "set-default-attribute-dev"
+      dataset:
+        description: "Logical dataset being processed"
+        required: true
+        default: "customer-preferences"
       failure_mode:
-        description: "Failure mode"
+        description: "Choose fixed for dedupe demos, or random for variety"
         required: true
         default: "fixed"
         type: choice
-        options: [fixed, random]
+        options:
+          - fixed
+          - random
       error_code:
-        description: "Error code"
+        description: "Used when failure_mode=fixed"
         required: true
-        default: "OBJECT_NOT_FOUND"
+        default: "MAPPING_FILE_MISSING"
         type: choice
-        options: [OBJECT_NOT_FOUND, OUTPUT_WRITE_FAILED, INVALID_INPUT, DOWNSTREAM_UNAVAILABLE, PROCESSING_TIMEOUT]
+        options:
+          - MAPPING_FILE_MISSING
+          - MAPPING_FILE_INVALID
+          - MAPPING_ITEM_NOT_FOUND
+          - SOURCE_RECORD_NOT_FOUND
+          - ATTRIBUTE_UPDATE_REJECTED
+          - DOWNSTREAM_API_UNAVAILABLE
+          - WRITE_TIMEOUT
+          - MISSING_REQUIRED_FIELD
 
 permissions:
   contents: read
 
+run-name: >-
+  Dev failure | job=${{ inputs.job_name }} | dataset=${{ inputs.dataset }}
+
 jobs:
-  run-failing-job:
+  run-dev-failing-job:
+    name: Run dev set_default_attribute job
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,17 +56,39 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run main script
+      - name: Show selected inputs
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Job: ${{ inputs.job_name }}"
+          echo "Dataset: ${{ inputs.dataset }}"
+          echo "Failure mode: ${{ inputs.failure_mode }}"
+          echo "Requested error code: ${{ inputs.error_code }}"
+
+      - name: Run simulated operational job
         id: job_sim
         env:
+          SIM_DATASET: ${{ inputs.dataset }}
           SIM_ERROR_CODE: ${{ inputs.error_code }}
-          SIM_MODE: ${{ inputs.failure_mode == 'random' && 'random' || 'failure' }}
         run: |
+          if [ "${{ inputs.failure_mode }}" = "random" ]; then
+            export SIM_MODE=random
+          else
+            export SIM_MODE=failure
+          fi
+
           set +e
-          python main.py
+          python scripts/main.py
           exit_code=$?
           set -e
+
           echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          echo "Captured simulator exit code: ${exit_code}"
+
+      - name: Show generated result
+        if: always()
+        run: |
+          cat job_result.json
 
       - name: Build request payload
         if: steps.job_sim.outputs.exit_code != '0'
@@ -53,39 +96,60 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
+
           result = json.loads(Path("job_result.json").read_text(encoding="utf-8"))
           payload = {
               "repo": "${{ github.repository }}",
               "workflowName": "${{ github.workflow }}",
               "runId": "${{ github.run_id }}",
               "runUrl": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-              "failures": [{
-                  "jobName": "${{ inputs.job_name }}",
-                  "summary": result["summary"],
-                  "details": result["details"],
-                  "severity": result["severity"],
-              }],
+              "failures": [
+                  {
+                      "jobName": "${{ inputs.job_name }}",
+                      "summary": result["summary"],
+                      "details": (
+                          f"{result['details']} "
+                          f"(dataset=${{ inputs.dataset }}, errorCode={result['errorCode']})"
+                      ),
+                      "severity": result["severity"],
+                  }
+              ],
           }
           Path("payload.json").write_text(json.dumps(payload), encoding="utf-8")
           PY
 
-      - name: Notify Dev Service
+          echo "Payload being sent:"
+          cat payload.json
+
+      - name: Notify dev central service
         if: steps.job_sim.outputs.exit_code != '0'
         env:
-          URL: ${{ secrets.DEV_WORKFLOW_FAILURE_ENDPOINT }}
-          SECRET: ${{ secrets.DEV_WORKFLOW_FAILURE_SECRET }}
+          WORKFLOW_FAILURE_ENDPOINT: ${{ secrets.DEV_WORKFLOW_FAILURE_ENDPOINT }}
+          WORKFLOW_FAILURE_SECRET: ${{ secrets.DEV_WORKFLOW_FAILURE_SECRET }}
         run: |
-          status_code=$(curl --show-error --silent --output /dev/null --write-out "%{http_code}" \
-            -X POST "$URL" \
+          response_file="response-dev.json"
+
+          status_code=$(curl \
+            --show-error \
+            --silent \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            -X POST "${WORKFLOW_FAILURE_ENDPOINT}" \
             -H "Content-Type: application/json" \
-            -H "X-Workflow-Secret: $SECRET" \
+            -H "X-Workflow-Secret: ${WORKFLOW_FAILURE_SECRET}" \
             --data @payload.json)
 
-          echo "Dev Status: $status_code"
+          echo "Dev HTTP status: ${status_code}"
+          echo "Dev response body:"
+          cat "$response_file"
+
           if [ "$status_code" -lt 200 ] || [ "$status_code" -ge 300 ]; then
+            echo "Dev request failed."
             exit 1
           fi
 
-      - name: Finalize Failure
+      - name: Mark workflow as failed for demo realism
         if: steps.job_sim.outputs.exit_code != '0'
-        run: exit 1
+        run: |
+          echo "The operational job failed, so this workflow is being marked as failed."
+          exit 1
