@@ -2,8 +2,6 @@ import json
 import os
 import random
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
 
 ERROR_CATALOG = {
     "MAPPING_FILE_MISSING": {
