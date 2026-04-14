@@ -1,6 +1,4 @@
-# This workflow conducts a run for the set_default_attribute job.
-
-name: Set Default Attribute - Dev Failure
+name: Dev Failure
 
 on:
   workflow_dispatch:
@@ -8,11 +6,7 @@ on:
       job_name:
         description: "Operational job name to simulate"
         required: true
-        default: "set-default-attribute-dev"
-      dataset:
-        description: "Logical dataset being processed"
-        required: true
-        default: "customer-preferences"
+        default: "daily-data-sync"
       failure_mode:
         description: "Choose fixed for dedupe demos, or random for variety"
         required: true
@@ -24,27 +18,21 @@ on:
       error_code:
         description: "Used when failure_mode=fixed"
         required: true
-        default: "MAPPING_FILE_MISSING"
+        default: "OBJECT_NOT_FOUND"
         type: choice
         options:
-          - MAPPING_FILE_MISSING
-          - MAPPING_FILE_INVALID
-          - MAPPING_ITEM_NOT_FOUND
-          - SOURCE_RECORD_NOT_FOUND
-          - ATTRIBUTE_UPDATE_REJECTED
-          - DOWNSTREAM_API_UNAVAILABLE
-          - WRITE_TIMEOUT
-          - MISSING_REQUIRED_FIELD
+          - OBJECT_NOT_FOUND
+          - OUTPUT_WRITE_FAILED
+          - INVALID_INPUT
+          - DOWNSTREAM_UNAVAILABLE
+          - PROCESSING_TIMEOUT
 
 permissions:
   contents: read
 
-run-name: >-
-  Dev failure | job=${{ inputs.job_name }} | dataset=${{ inputs.dataset }}
-
 jobs:
-  run-dev-failing-job:
-    name: Run dev set_default_attribute job
+  run-failing-job:
+    name: Run failing simulated job
     runs-on: ubuntu-latest
 
     steps:
@@ -61,14 +49,12 @@ jobs:
           echo "Repository: ${{ github.repository }}"
           echo "Workflow: ${{ github.workflow }}"
           echo "Job: ${{ inputs.job_name }}"
-          echo "Dataset: ${{ inputs.dataset }}"
           echo "Failure mode: ${{ inputs.failure_mode }}"
           echo "Requested error code: ${{ inputs.error_code }}"
 
       - name: Run simulated operational job
-        id: job_sim
+        id: dev_fail
         env:
-          SIM_DATASET: ${{ inputs.dataset }}
           SIM_ERROR_CODE: ${{ inputs.error_code }}
         run: |
           if [ "${{ inputs.failure_mode }}" = "random" ]; then
@@ -77,6 +63,8 @@ jobs:
             export SIM_MODE=failure
           fi
 
+          # Temporarily disable "exit on error" so we can capture the script exit code
+          # and allow later steps to build/send the payload.
           set +e
           python scripts/main.py
           exit_code=$?
@@ -91,7 +79,7 @@ jobs:
           cat job_result.json
 
       - name: Build request payload
-        if: steps.job_sim.outputs.exit_code != '0'
+        if: steps.dev_fail.outputs.exit_code != '0'
         run: |
           python - <<'PY'
           import json
@@ -107,10 +95,7 @@ jobs:
                   {
                       "jobName": "${{ inputs.job_name }}",
                       "summary": result["summary"],
-                      "details": (
-                          f"{result['details']} "
-                          f"(dataset=${{ inputs.dataset }}, errorCode={result['errorCode']})"
-                      ),
+                      "details": result["details"],
                       "severity": result["severity"],
                   }
               ],
@@ -121,13 +106,15 @@ jobs:
           echo "Payload being sent:"
           cat payload.json
 
-      - name: Notify dev central service
-        if: steps.job_sim.outputs.exit_code != '0'
+      - name: Notify central service
+        if: steps.dev_fail.outputs.exit_code != '0'
         env:
           WORKFLOW_FAILURE_ENDPOINT: ${{ secrets.DEV_WORKFLOW_FAILURE_ENDPOINT }}
           WORKFLOW_FAILURE_SECRET: ${{ secrets.DEV_WORKFLOW_FAILURE_SECRET }}
         run: |
-          response_file="response-dev.json"
+          # Do not echo the endpoint or secret.
+          # We only capture the HTTP status code and response body.
+          response_file="response.json"
 
           status_code=$(curl \
             --show-error \
@@ -139,17 +126,17 @@ jobs:
             -H "X-Workflow-Secret: ${WORKFLOW_FAILURE_SECRET}" \
             --data @payload.json)
 
-          echo "Dev HTTP status: ${status_code}"
-          echo "Dev response body:"
+          echo "HTTP status: ${status_code}"
+          echo "Response body:"
           cat "$response_file"
 
           if [ "$status_code" -lt 200 ] || [ "$status_code" -ge 300 ]; then
-            echo "Dev request failed."
+            echo "Request failed."
             exit 1
           fi
 
       - name: Mark workflow as failed for demo realism
-        if: steps.job_sim.outputs.exit_code != '0'
+        if: steps.dev_fail.outputs.exit_code != '0'
         run: |
           echo "The operational job failed, so this workflow is being marked as failed."
           exit 1
