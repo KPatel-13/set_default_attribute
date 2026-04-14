@@ -28,6 +28,13 @@ on:
           - INVALID_INPUT
           - DOWNSTREAM_UNAVAILABLE
           - PROCESSING_TIMEOUT
+          - MAPPING_FILE_MISSING
+          - MAPPING_FILE_INVALID
+          - MAPPING_ITEM_NOT_FOUND
+          - SOURCE_RECORD_NOT_FOUND
+          - ATTRIBUTE_UPDATE_REJECTED
+          - DOWNSTREAM_API_UNAVAILABLE
+
 
 permissions:
   contents: read
