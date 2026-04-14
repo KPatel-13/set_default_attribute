@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       job_name:
-        description: "Operational job name to simulate"
+        description: "Operational job name"
         required: true
         default: "set-default-attribute-dev"
       dataset:
